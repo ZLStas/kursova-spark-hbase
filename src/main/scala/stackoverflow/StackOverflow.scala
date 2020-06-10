@@ -1,10 +1,18 @@
 package stackoverflow
 
+import java.net.InetAddress
+import java.util
+import java.util.Set
+import java.util.stream.Collectors
+
+import org.apache.hadoop.conf.Configuration
+import org.apache.hadoop.fs.FileSystem
 import org.apache.spark.{SparkConf, SparkContext}
 import org.apache.spark.rdd.RDD
 import org.apache.spark.SparkContext._
+import org.apache.spark.serializer.KryoSerializer
+
 import annotation.tailrec
-import scala.reflect.ClassTag
 
 /** A raw stackoverflow posting, either a question or an answer */
 case class Posting(postingType: Int, id: Int, acceptedAnswer: Option[Int], parentId: Option[QID], score: Int, tags: Option[String]) extends Serializable
@@ -18,8 +26,14 @@ object StackOverflow extends StackOverflow {
 
   /** Main function */
   def main(args: Array[String]): Unit = {
-
+    println("**********************************")
+    println(sc.hadoopConfiguration.toString)
+    println("**********************************")
+    val fs = FileSystem.get(sc.hadoopConfiguration)
+    println(fs.getUri.toString)
+    println("**********************************")
     val lines = sc.textFile("src/main/resources/stackoverflow/stackoverflow.csv")
+
     val raw = rawPostings(lines)
     val grouped = groupedPostings(raw)
     val scored = scoredPostings(grouped)
@@ -34,6 +48,30 @@ object StackOverflow extends StackOverflow {
 
 /** The parsing and kmeans methods */
 class StackOverflow extends StackOverflowInterface with Serializable {
+
+
+  protected def createSparkConfig: SparkConf = {
+    val sparkMaster = "spark.master"
+    val sparkConf = new SparkConf
+    sparkConf.setAppName("Overflow")
+    if (sparkConf.getOption(sparkMaster).isEmpty) {
+      val hostAddress = InetAddress.getLoopbackAddress.getHostAddress
+      sparkConf.set("spark.driver.host", hostAddress)
+      sparkConf.set("SPARK_LOCAL_IP", hostAddress)
+      sparkConf.set(sparkMaster, "local")
+    }
+    // Register Kryo as serializer with some basic registration.
+    sparkConf.set("spark.serializer", classOf[KryoSerializer].getCanonicalName)
+    System.getProperties
+      .stringPropertyNames.stream
+      .filter((key: String) => key.contains("spark"))
+      .forEach(key=> {
+        val value = System.getProperty(key)
+        sparkConf.set(key, value)
+      })
+    sparkConf
+  }
+
 
   /** Languages */
   val langs =
